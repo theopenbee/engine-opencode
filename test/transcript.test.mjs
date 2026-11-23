@@ -68,6 +68,16 @@ test("an unknown tool takes the first string of its input as the summary", () =>
   assert.deepEqual(transcriptSteps(path), [{ type: "tool", kind: "other", name: "lookup", summary: "bees", output: "ok", status: "done" }]);
 });
 
+test("tool names matching object prototype members are classified as other", () => {
+  const names = ["constructor", "toString", "hasOwnProperty", "__proto__"];
+  const path = writeLog(names.map((name) => tool(name, { status: "completed", input: { value: "x" }, output: "ok" })));
+  assert.deepEqual(
+    transcriptSteps(path),
+    names.map((name) => ({ type: "tool", kind: "other", name, summary: "x", output: "ok", status: "done" })),
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(transcriptSteps(path))), transcriptSteps(path));
+});
+
 test("send_message of any server prefix is a message with its content as the summary", () => {
   const path = writeLog([tool("bee_send_message", { status: "completed", input: { content: "hi there" }, output: "sent" })]);
   assert.deepEqual(transcriptSteps(path), [{ type: "tool", kind: "message", name: "bee_send_message", summary: "hi there", output: "sent", status: "done" }]);

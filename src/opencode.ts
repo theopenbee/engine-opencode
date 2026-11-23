@@ -181,18 +181,18 @@ export async function scanLog(logPath: string): Promise<LogScan> {
   return scan;
 }
 
-const TOOL_KINDS: Record<string, ToolKind> = {
-  bash: "command",
-  read: "read",
-  edit: "edit",
-  write: "edit",
-  patch: "edit",
-  grep: "search",
-  glob: "search",
-  list: "search",
-  webfetch: "web",
-  websearch: "web",
-};
+const TOOL_KINDS = new Map<string, ToolKind>([
+  ["bash", "command"],
+  ["read", "read"],
+  ["edit", "edit"],
+  ["write", "edit"],
+  ["patch", "edit"],
+  ["grep", "search"],
+  ["glob", "search"],
+  ["list", "search"],
+  ["webfetch", "web"],
+  ["websearch", "web"],
+]);
 
 const SUMMARY_KEYS: Partial<Record<ToolKind, string[]>> = {
   command: ["command"],
@@ -205,7 +205,7 @@ const SUMMARY_KEYS: Partial<Record<ToolKind, string[]>> = {
 
 function toolKind(name: string): ToolKind {
   if (name.includes("send_message")) return "message";
-  return TOOL_KINDS[name] ?? "other";
+  return TOOL_KINDS.get(name) ?? "other";
 }
 
 function toolSummary(kind: ToolKind, input: unknown): string | undefined {
