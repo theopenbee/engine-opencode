@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import {
   buildArgs,
+  collectUsage,
   configContent,
   failureText,
   findOpencode,
@@ -92,9 +93,13 @@ test("configContent keeps the existing inline config", () => {
   });
 });
 
-test("configContent replaces an existing inline config that is not a JSON object", () => {
-  for (const existing of ["not json", "[1]", "  "]) {
-    assert.deepEqual(Object.keys(JSON.parse(configContent(MCP, existing))), ["mcp"]);
+test("configContent treats a blank inline config as unset", () => {
+  assert.deepEqual(Object.keys(JSON.parse(configContent(MCP, "  "))), ["mcp"]);
+});
+
+test("configContent refuses an inline config it cannot merge into", () => {
+  for (const existing of ["not json", "[1]", '{"model": "a/b",}', '{\n  // note\n  "model": "a/b"\n}']) {
+    assert.throws(() => configContent(MCP, existing), /OPENCODE_CONFIG_CONTENT must be a plain JSON object/);
   }
 });
 
@@ -142,6 +147,7 @@ test("majorVersion reads the major version", () => {
   assert.equal(majorVersion("opencode v2.3.2"), 2);
   assert.equal(majorVersion("1.0.150"), 1);
   assert.equal(majorVersion("dev"), undefined);
+  assert.equal(majorVersion("0.0.0-dev-202611220000"), undefined);
 });
 
 test("sessionUsage sums assistant messages per model", () => {
@@ -188,7 +194,39 @@ test("findOpencode falls back to ~/.opencode/bin when opencode is not on PATH", 
     assert.equal(findOpencode({}, home), exe);
     assert.throws(() => findOpencode({}, freshDir("other-home")), /opencode not found on PATH/);
     assert.throws(() => findOpencode({ path: join(home, "nope") }, home), /not found/);
+    if (process.platform !== "win32") {
+      chmodSync(exe, 0o644);
+      assert.throws(() => findOpencode({}, home), /opencode not found on PATH/);
+    }
   } finally {
     process.env.PATH = saved;
   }
+});
+
+function fakeExporter(body) {
+  const path = join(freshDir("fake"), "opencode");
+  writeFileSync(path, `#!${process.execPath}\n${body}\n`);
+  chmodSync(path, 0o755);
+  return path;
+}
+
+test("collectUsage reads nothing once the time budget is spent", async () => {
+  const command = fakeExporter('process.stdout.write(JSON.stringify({ messages: [] }));');
+  assert.deepEqual(await collectUsage(command, ["a", "b"], { budgetMs: 0 }), {});
+});
+
+test("collectUsage stops an export that outlives the time budget", { skip: process.platform === "win32" }, async () => {
+  const command = fakeExporter("setTimeout(() => {}, 10000);");
+  const started = Date.now();
+  assert.deepEqual(await collectUsage(command, ["a"], { budgetMs: 500 }), {});
+  assert.ok(Date.now() - started < 5000);
+});
+
+test("collectUsage exports sessions in parallel", { skip: process.platform === "win32" }, async () => {
+  const command = fakeExporter('setTimeout(() => process.stdout.write(JSON.stringify({ messages: [] })), 400);');
+  const ids = Array.from({ length: 8 }, (_, i) => `s${i}`);
+  const started = Date.now();
+  const usage = await collectUsage(command, ids);
+  assert.deepEqual(Object.keys(usage), ids);
+  assert.ok(Date.now() - started < 8 * 400, `took ${Date.now() - started}ms`);
 });

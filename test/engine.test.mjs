@@ -328,6 +328,14 @@ for (const runtime of runtimes) {
     assert.equal(config.mcp.servers.openbee.url, MCP.url);
   });
 
+  t("run refuses an inline config it cannot merge the MCP server into, without starting opencode", async () => {
+    const record = join(freshDir("rec"), "calls.jsonl");
+    const req = baseRequest("run", runParams({ mcp: MCP }));
+    const res = response(await runPlugin(runtime, req, { FAKE_OPENCODE_RECORD: record, OPENCODE_CONFIG_CONTENT: '{"model": "a/b",}' }));
+    assert.match(res.error.message, /OPENCODE_CONFIG_CONTENT must be a plain JSON object/);
+    assert.deepEqual(recordedCalls(record), []);
+  });
+
   t("run leaves an inline config alone when there is no MCP address", async () => {
     const record = join(freshDir("rec"), "calls.jsonl");
     const existing = JSON.stringify({ model: "a/b" });

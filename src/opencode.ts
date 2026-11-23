@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { createReadStream, statSync } from "node:fs";
+import { accessSync, constants, createReadStream, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -10,7 +10,7 @@ import type { Engine, EngineRequest, RunParams, RunResult, TokenUsage } from "@t
 const MIN_MAJOR_VERSION = 2;
 const SESSION_PREFIX = "ses_";
 const SESSION_ID = /^[A-Za-z0-9_-]+$/;
-const EXPORT_CONCURRENCY = 4;
+const EXPORT_CONCURRENCY = 8;
 const EXPORT_TIMEOUT_MS = 20_000;
 const EXPORT_MAX_BUFFER = 512 * 1024 * 1024;
 const USAGE_BUDGET_MS = 50_000;
@@ -32,9 +32,11 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-function isFile(path: string): boolean {
+function isExecutable(path: string): boolean {
   try {
-    return statSync(path).isFile();
+    if (!statSync(path).isFile()) return false;
+    if (process.platform !== "win32") accessSync(path, constants.X_OK);
+    return true;
   } catch {
     return false;
   }
@@ -64,14 +66,16 @@ export function findOpencode(config: Record<string, unknown>, home: string = hom
     const configured = typeof config.path === "string" ? config.path.trim() : "";
     if (configured) throw err;
     const fallback = join(home, ".opencode", "bin", process.platform === "win32" ? "opencode.exe" : "opencode");
-    if (isFile(fallback)) return fallback;
+    if (isExecutable(fallback)) return fallback;
     throw err;
   }
 }
 
 export function majorVersion(version: string): number | undefined {
-  const match = /(\d+)\.\d+/.exec(version);
-  return match ? Number(match[1]) : undefined;
+  const match = /(\d+)\.(\d+)\.(\d+)/.exec(version);
+  if (!match) return undefined;
+  if (match[0] === "0.0.0") return undefined;
+  return Number(match[1]);
 }
 
 export function opencodeSessionId(sessionId: string): string {
@@ -91,12 +95,10 @@ function parseConfigContent(existing: string | undefined): JsonObject {
   try {
     parsed = JSON.parse(existing);
   } catch {
-    log.warn("OPENCODE_CONFIG_CONTENT is not valid JSON, it is replaced for this run");
-    return {};
+    parsed = undefined;
   }
   if (!isObject(parsed)) {
-    log.warn("OPENCODE_CONFIG_CONTENT is not a JSON object, it is replaced for this run");
-    return {};
+    throw new Error("OPENCODE_CONFIG_CONTENT must be a plain JSON object, without comments or trailing commas, to add openbee's MCP server");
   }
   return parsed;
 }

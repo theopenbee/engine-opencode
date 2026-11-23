@@ -71,7 +71,7 @@ opencode run --standalone --auto --format json [--session ses_<id>] [extra args]
 - The prompt is written to OpenCode's standard input.
 - `--standalone` runs a private OpenCode server for the run. OpenCode's shared background service would not see openbee's environment, so provider keys from **Env** and the MCP key would be lost.
 - `--auto` approves tool permissions that are not explicitly denied in your OpenCode config.
-- When openbee provides its MCP server, the plugin adds it through `OPENCODE_CONFIG_CONTENT` as a remote server that sends `Authorization: Bearer {env:OPENBEE_API_KEY}`. OpenCode expands the placeholder from its environment, so the API key never appears on the command line or in the config. An `OPENCODE_CONFIG_CONTENT` already set in openbee's environment is kept and the server is merged into it.
+- When openbee provides its MCP server, the plugin adds it through `OPENCODE_CONFIG_CONTENT` as a remote server that sends `Authorization: Bearer {env:OPENBEE_API_KEY}`. OpenCode expands the placeholder from its environment, so the API key never appears on the command line or in the config. An `OPENCODE_CONFIG_CONTENT` already set in openbee's environment is kept and the server is merged into it. It must then be plain JSON, without comments or trailing commas; otherwise the run fails instead of dropping your settings.
 - Auto-update is disabled for runs started by openbee (`OPENCODE_DISABLE_AUTOUPDATE=1`).
 - The result is the text of the last text part. A non-zero exit code, or an error event that no text follows, is reported as a failed run, with OpenCode's own message when it gave one.
 - OpenCode's output is written to the run's log file as it arrives.
