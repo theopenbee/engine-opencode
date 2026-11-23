@@ -3,8 +3,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 
-import { cliVersion, execCli, findCli, log, spawnCli } from "@theopenbee/engine-sdk";
-import type { Engine, EngineRequest, ModelInfo, RunParams, RunResult, TokenUsage } from "@theopenbee/engine-sdk";
+import { TranscriptBuilder, cliVersion, execCli, findCli, log, readJsonLines, spawnCli, stripMcpPrefix } from "@theopenbee/engine-sdk";
+import type { Engine, EngineRequest, ModelInfo, RunParams, RunResult, TokenUsage, ToolKind, TranscriptStep } from "@theopenbee/engine-sdk";
 
 const MIN_MAJOR_VERSION = 2;
 const SESSION_PREFIX = "ses_";
@@ -51,6 +51,14 @@ function stringOrEmpty(value: unknown): string {
 
 function numberOrZero(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function lastNonEmptyLine(text: string): string {
@@ -171,6 +179,67 @@ export async function scanLog(logPath: string): Promise<LogScan> {
     stream.destroy();
   }
   return scan;
+}
+
+const TOOL_KINDS: Record<string, ToolKind> = {
+  bash: "command",
+  read: "read",
+  edit: "edit",
+  write: "edit",
+  patch: "edit",
+  grep: "search",
+  glob: "search",
+  list: "search",
+  webfetch: "web",
+  websearch: "web",
+};
+
+const SUMMARY_KEYS: Partial<Record<ToolKind, string[]>> = {
+  command: ["command"],
+  read: ["filePath"],
+  edit: ["filePath"],
+  search: ["pattern", "path"],
+  web: ["url", "query"],
+  message: ["content"],
+};
+
+function toolKind(name: string): ToolKind {
+  if (name.includes("send_message")) return "message";
+  return TOOL_KINDS[name] ?? "other";
+}
+
+function toolSummary(kind: ToolKind, input: unknown): string | undefined {
+  if (!isObject(input)) return undefined;
+  const candidates = SUMMARY_KEYS[kind]?.map((key) => input[key]) ?? Object.values(input);
+  return candidates.map(nonEmptyString).find((value) => value !== undefined);
+}
+
+function addTool(builder: TranscriptBuilder, part: JsonObject, index: number): void {
+  const name = nonEmptyString(part.tool);
+  if (name === undefined) return;
+  const state = isObject(part.state) ? part.state : {};
+  const time = isObject(state.time) ? state.time : {};
+  const kind = toolKind(name);
+  const id = nonEmptyString(part.callID) ?? nonEmptyString(part.id) ?? `tool-${index}`;
+  builder.toolStart(id, { kind, name: stripMcpPrefix(name), summary: toolSummary(kind, state.input) }, finiteNumber(time.start));
+  if (state.status !== "completed" && state.status !== "error") return;
+  builder.toolEnd(
+    id,
+    { output: nonEmptyString(state.output) ?? stringOrEmpty(state.error), isError: state.status === "error" },
+    finiteNumber(time.end),
+  );
+}
+
+export function transcriptSteps(logPath: string): TranscriptStep[] {
+  const builder = new TranscriptBuilder();
+  readJsonLines(logPath).forEach((event, index) => {
+    const part = isObject(event.part) ? event.part : {};
+    if (event.type === "text") builder.text(stringOrEmpty(part.text));
+    else if (event.type === "reasoning") builder.thinking(stringOrEmpty(part.text));
+    else if (event.type === "tool_use") addTool(builder, part, index);
+    else if (event.type === "error") builder.error(eventErrorText(event.error));
+  });
+  return builder.steps();
 }
 
 export function failureText(code: number | null, signal: NodeJS.Signals | null, stderrTail: string): string {
@@ -422,5 +491,9 @@ export const engine: Engine = {
 
   async models(req) {
     return parseModels(await listModels(findOpencode(req.config)));
+  },
+
+  async transcript(req) {
+    return transcriptSteps(req.params.log_path);
   },
 };

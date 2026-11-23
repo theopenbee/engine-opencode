@@ -506,6 +506,26 @@ for (const runtime of runtimes) {
     assert.deepEqual(res, { error: { message: "opencode not found on PATH" } });
   });
 
+  t("transcript lists the steps of a run log", async () => {
+    const params = runParams();
+    response(await runPlugin(runtime, baseRequest("run", params)));
+    const res = response(await runPlugin(runtime, baseRequest("transcript", { log_path: params.log_path })));
+    assert.deepEqual(res, {
+      result: {
+        steps: [
+          { type: "text", text: "working on it" },
+          { type: "tool", kind: "other", name: "shell", output: "a", status: "done" },
+          { type: "text", text: "final answer" },
+        ],
+      },
+    });
+  });
+
+  t("transcript returns no steps for a missing log", async () => {
+    const res = response(await runPlugin(runtime, baseRequest("transcript", { log_path: join(freshDir("logs"), "missing.log") })));
+    assert.deepEqual(res, { result: { steps: [] } });
+  });
+
   t("usage exports each session and sums tokens per model, omitting unknown sessions", async () => {
     const sessions = freshDir("sessions");
     const record = join(freshDir("rec"), "calls.jsonl");

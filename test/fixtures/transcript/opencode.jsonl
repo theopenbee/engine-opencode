@@ -1,0 +1,24 @@
+{"type":"step_start","sessionID":"ses_demo","part":{"type":"step-start"}}
+Loading providers...
+{"type":"reasoning","sessionID":"ses_demo","part":{"type":"reasoning","text":"Plan: list the files, then read one of them."}}
+{"type":"reasoning","sessionID":"ses_demo","part":{"type":"reasoning","text":""}}
+{"type":"text","sessionID":"ses_demo","part":{"type":"text","text":"Let me look around."}}
+{"type":"tool_use","sessionID":"ses_demo","part":{"id":"prt_1","type":"tool","callID":"call_1","tool":"bash","state":{"status":"completed","input":{"command":"ls -la","description":"List files"},"output":"a.txt\nb.txt\n","time":{"start":1000,"end":1250}}}}
+{"type":"tool_use","sessionID":"ses_demo","part":{"id":"prt_2","type":"tool","callID":"call_2","tool":"read","state":{"status":"completed","input":{"filePath":"/tmp/demo/a.txt"},"output":"hello","time":{"start":2000,"end":2040}}}}
+{"type":"tool_use","sessionID":"ses_demo","part":{"id":"prt_3","type":"tool","callID":"call_3","tool":"edit","state":{"status":"error","input":{"filePath":"/tmp/demo/a.txt","oldString":"x","newString":"y"},"error":"oldString not found","time":{"start":3000,"end":3010}}}}
+{"type":"tool_use","sessionID":"ses_demo","part":{"id":"prt_4","type":"tool","callID":"call_4","tool":"grep","state":{"status":"completed","input":{"pattern":"TODO","path":"/tmp/demo"},"output":"","time":{"start":4000,"end":4005}}}}
+{"type":"tool_use","sessionID":"ses_demo","part":{"id":"prt_list","type":"tool","tool":"list","state":{"status":"completed","input":{"path":"/tmp/demo"},"output":"a.txt\nb.txt"}}}
+{"type":"tool_use","sessionID":"ses_demo","part":{"type":"tool","tool":"webfetch","state":{"status":"completed","input":{"url":"https://example.com/docs","format":"markdown"},"output":"Example Domain","time":{"start":5000,"end":5600}}}}
+{"type":"tool_use","sessionID":"ses_demo","part":{"id":"prt_5","type":"tool","callID":"call_5","tool":"websearch","state":{"status":"completed","input":{"query":"neutral topic"},"output":"three results","time":{"start":6000,"end":6300}}}}
+{"type":"tool_use","sessionID":"ses_demo","part":{"type":"tool","tool":"task","state":{"status":"completed","input":{"description":"Survey modules","subagent_type":"general","prompt":"Look at each module."},"output":"Survey finished","time":{"start":7000,"end":9000}}}}
+{"type":"tool_use","sessionID":"ses_demo","part":{"id":"prt_6","type":"tool","callID":"call_6","tool":"openbee_send_message","state":{"status":"completed","input":{"content":"Progress: two files checked."},"output":"sent"}}}
+{"type":"tool_use","sessionID":"ses_demo","part":{"id":"prt_7","type":"tool","callID":"call_7","tool":"write","state":{"status":"running","input":{"filePath":"/tmp/demo/c.txt","content":"draft"},"time":{"start":10000}}}}
+{"type":"tool_use","sessionID":"ses_demo","part":{"id":"prt_8","type":"tool","callID":"call_8","tool":"patch","state":{"status":"pending","input":{},"raw":""}}}
+{"type":"step_finish","sessionID":"ses_demo","part":{"type":"step-finish"}}
+{"type":"step_start","sessionID":"ses_demo","part":{"type":"step-start"}}
+{"type":"text","sessionID":"ses_demo","part":{"type":"text","text":"First part of the summary."}}
+{"type":"text","sessionID":"ses_demo","part":{"type":"text","text":"Second part of the summary."}}
+{"type":"error","sessionID":"ses_demo","error":{"type":"provider.auth","message":"Authentication Fails"}}
+{"type":"error","sessionID":"ses_demo","error":{"type":"provider.no-route"}}
+{"type":"error","sessionID":"ses_demo","error":"plain failure"}
+{"type":"text","sessionID":"ses_demo","part":{"type":"text","text":"Wrapping up the
