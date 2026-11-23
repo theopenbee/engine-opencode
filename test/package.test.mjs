@@ -29,7 +29,7 @@ test("manifest describes the opencode engine", () => {
 test("package.json publishes dist and the manifest", () => {
   const pkg = readJson("package.json");
   assert.equal(pkg.name, "@theopenbee/engine-opencode");
-  assert.equal(pkg.version, "0.1.0");
+  assert.equal(pkg.version, "0.2.0");
   assert.equal(pkg.type, "module");
   assert.equal(pkg.license, "MIT");
   assert.deepEqual(pkg.files, ["dist", "openbee.plugin.json"]);
