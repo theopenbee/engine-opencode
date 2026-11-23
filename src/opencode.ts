@@ -214,6 +214,61 @@ function toolSummary(kind: ToolKind, input: unknown): string | undefined {
   return candidates.map(nonEmptyString).find((value) => value !== undefined);
 }
 
+function diffLines(text: unknown, marker: string): string[] {
+  if (typeof text !== "string" || text === "") return [];
+  const lines = text.split(/\r?\n/);
+  if (lines[lines.length - 1] === "") lines.pop();
+  return lines.map((line) => marker + line);
+}
+
+const HUNK_HEADER = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/;
+
+function unifiedDiffLines(patch: string): string[] {
+  const rows = patch.split(/\r?\n/);
+  const lines: string[] = [];
+  let index = 0;
+  while (index < rows.length) {
+    const header = HUNK_HEADER.exec(rows[index++]);
+    if (!header) continue;
+    let oldLeft = header[1] === undefined ? 1 : Number(header[1]);
+    let newLeft = header[2] === undefined ? 1 : Number(header[2]);
+    while (index < rows.length && (oldLeft > 0 || newLeft > 0)) {
+      const row = rows[index];
+      if (row === "" && index === rows.length - 1) break;
+      const marker = row === "" ? " " : row[0];
+      if (marker === "\\") {
+        index++;
+        continue;
+      }
+      if (marker !== " " && marker !== "+" && marker !== "-") break;
+      if (marker !== "+") oldLeft--;
+      if (marker !== "-") newLeft--;
+      lines.push(marker + row.slice(1));
+      index++;
+    }
+  }
+  return lines;
+}
+
+function patchDiff(input: JsonObject): string[] {
+  for (const key of ["patchText", "patch", "diff"]) {
+    const value = input[key];
+    if (typeof value !== "string") continue;
+    const lines = unifiedDiffLines(value);
+    if (lines.length > 0) return lines;
+  }
+  return [];
+}
+
+function toolDiff(name: string, input: unknown): string | undefined {
+  if (!isObject(input)) return undefined;
+  let lines: string[] = [];
+  if (name === "edit") lines = [...diffLines(input.oldString, "-"), ...diffLines(input.newString, "+")];
+  else if (name === "write") lines = diffLines(input.content, "+");
+  else if (name === "patch") lines = patchDiff(input);
+  return lines.length > 0 ? lines.join("\n") : undefined;
+}
+
 function addTool(builder: TranscriptBuilder, part: JsonObject, index: number): void {
   const name = nonEmptyString(part.tool);
   if (name === undefined) return;
@@ -221,7 +276,11 @@ function addTool(builder: TranscriptBuilder, part: JsonObject, index: number): v
   const time = isObject(state.time) ? state.time : {};
   const kind = toolKind(name);
   const id = nonEmptyString(part.callID) ?? nonEmptyString(part.id) ?? `tool-${index}`;
-  builder.toolStart(id, { kind, name: stripMcpPrefix(name), summary: toolSummary(kind, state.input) }, finiteNumber(time.start));
+  builder.toolStart(
+    id,
+    { kind, name: stripMcpPrefix(name), summary: toolSummary(kind, state.input), diff: toolDiff(name, state.input) },
+    finiteNumber(time.start),
+  );
   if (state.status !== "completed" && state.status !== "error") return;
   builder.toolEnd(
     id,
