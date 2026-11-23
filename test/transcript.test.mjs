@@ -218,10 +218,11 @@ test("only edit tools get a diff", () => {
   assert.equal(diffOf("mcp_edit", input), undefined);
 });
 
-test("a long diff is clipped like tool output", () => {
+test("a long diff is clipped on line boundaries", () => {
   const content = Array.from({ length: 1000 }, (_, i) => `line ${i}`).join("\n");
   const diff = diffOf("write", { filePath: "/a", content });
-  assert.equal(diff.length, 4000);
-  assert.ok(diff.includes("\n…\n"));
-  assert.ok(diff.endsWith("+line 999"));
+  assert.ok(diff.length <= 4000);
+  assert.equal(diff.split("\n").filter((line) => line === "…").length, 1);
+  assert.ok(diff.split("\n").every((line) => line === "…" || /^\+line \d+$/.test(line)));
+  assert.ok(diff.endsWith("\n+line 999"));
 });
