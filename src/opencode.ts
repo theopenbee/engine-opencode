@@ -1,10 +1,9 @@
-import { execFile } from "node:child_process";
 import { accessSync, constants, createReadStream, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 
-import { cliVersion, findCli, log, spawnCli } from "@theopenbee/engine-sdk";
+import { cliVersion, execCli, findCli, log, spawnCli } from "@theopenbee/engine-sdk";
 import type { Engine, EngineRequest, ModelInfo, RunParams, RunResult, TokenUsage } from "@theopenbee/engine-sdk";
 
 const MIN_MAJOR_VERSION = 2;
@@ -249,7 +248,7 @@ export function childSessionIds(exported: unknown): string[] {
 
 function exportSession(command: string, opencodeId: string, timeoutMs: number): Promise<unknown> {
   return new Promise((resolve) => {
-    execFile(
+    execCli(
       command,
       ["session", "export", "--standalone", opencodeId],
       {
@@ -350,7 +349,7 @@ export function parseModels(output: string): ModelInfo[] {
 
 function listModels(command: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(
+    execCli(
       command,
       ["models", "--standalone"],
       {
