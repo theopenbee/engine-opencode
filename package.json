@@ -1,6 +1,6 @@
 {
   "name": "@theopenbee/engine-opencode",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "OpenCode engine plugin for openbee",
   "keywords": [
     "openbee",
