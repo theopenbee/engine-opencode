@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 
 import { cliVersion, findCli, log, spawnCli } from "@theopenbee/engine-sdk";
-import type { Engine, EngineRequest, RunParams, RunResult, TokenUsage } from "@theopenbee/engine-sdk";
+import type { Engine, EngineRequest, ModelInfo, RunParams, RunResult, TokenUsage } from "@theopenbee/engine-sdk";
 
 const MIN_MAJOR_VERSION = 2;
 const SESSION_PREFIX = "ses_";
@@ -14,6 +14,8 @@ const EXPORT_CONCURRENCY = 8;
 const EXPORT_TIMEOUT_MS = 20_000;
 const EXPORT_MAX_BUFFER = 512 * 1024 * 1024;
 const USAGE_BUDGET_MS = 50_000;
+const MODELS_TIMEOUT_MS = 20_000;
+const MODELS_MAX_BUFFER = 64 * 1024 * 1024;
 const BASE_ENV = { OPENCODE_DISABLE_AUTOUPDATE: "1" };
 
 type JsonObject = Record<string, unknown>;
@@ -81,6 +83,15 @@ export function majorVersion(version: string): number | undefined {
 export function opencodeSessionId(sessionId: string): string {
   if (!SESSION_ID.test(sessionId)) throw new Error(`invalid session id ${JSON.stringify(sessionId)}`);
   return SESSION_PREFIX + sessionId;
+}
+
+export function modelArgs(model: string | undefined, extraArgs: string[]): string[] {
+  if (typeof model !== "string" || model === "") return [];
+  if (extraArgs.some((arg) => arg === "--model" || arg === "-m" || arg.startsWith("--model="))) {
+    log.warn(`engine args already set a model, ignoring model ${JSON.stringify(model)}`);
+    return [];
+  }
+  return ["--model", model];
 }
 
 export function buildArgs(sessionId: string, extraArgs: string[]): string[] {
@@ -255,6 +266,41 @@ export async function collectUsage(
   return Object.fromEntries(ids.filter((id) => found.has(id)).map((id) => [id, found.get(id) ?? []]));
 }
 
+export function parseModels(output: string): ModelInfo[] {
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "")
+    .map((id) => ({ id }));
+}
+
+function listModels(command: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      command,
+      ["models", "--standalone"],
+      {
+        timeout: MODELS_TIMEOUT_MS,
+        killSignal: "SIGKILL",
+        maxBuffer: MODELS_MAX_BUFFER,
+        windowsHide: true,
+        env: { ...process.env, ...BASE_ENV },
+      },
+      (err, stdout, stderr) => {
+        if (!err) {
+          resolve(String(stdout));
+          return;
+        }
+        const { code, killed, signal } = err as { code?: unknown; killed?: boolean; signal?: NodeJS.Signals | null };
+        if (typeof code === "number") reject(new Error(failureText(code, null, String(stderr))));
+        else if (killed) reject(new Error(`opencode models timed out after ${MODELS_TIMEOUT_MS / 1000}s`));
+        else if (code === null) reject(new Error(failureText(null, signal ?? null, String(stderr))));
+        else reject(new Error(`opencode models failed: ${errorMessage(err)}`));
+      },
+    );
+  });
+}
+
 export const engine: Engine = {
   async check(req) {
     const path = findOpencode(req.config);
@@ -269,7 +315,8 @@ export const engine: Engine = {
   async run(req: EngineRequest<RunParams>): Promise<RunResult> {
     const params = req.params;
     const command = findOpencode(req.config);
-    const args = buildArgs(params.session_id ?? "", params.extra_args ?? []);
+    const extraArgs = params.extra_args ?? [];
+    const args = buildArgs(params.session_id ?? "", [...modelArgs(params.model, extraArgs), ...extraArgs]);
     const env: NodeJS.ProcessEnv = { ...BASE_ENV };
     const content = configContent(params.mcp, process.env.OPENCODE_CONFIG_CONTENT);
     if (content !== undefined) env.OPENCODE_CONFIG_CONTENT = content;
@@ -298,5 +345,9 @@ export const engine: Engine = {
 
   async usage(req) {
     return collectUsage(findOpencode(req.config), req.params.session_ids ?? []);
+  },
+
+  async models(req) {
+    return parseModels(await listModels(findOpencode(req.config)));
   },
 };

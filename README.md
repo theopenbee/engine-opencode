@@ -48,13 +48,9 @@ The plugin checks the setting when it is enabled: it runs `opencode --version` a
 
 ## Choosing a model
 
-Put the model in the worker's engine arguments, in OpenCode's `provider/model` form:
+Set the worker's **Model** field, in OpenCode's `provider/model` form (for example `deepseek/deepseek-flash`). The plugin passes it to OpenCode as `--model <model>`, before the extra args. The suggested models come from `opencode models --standalone`, which lists the models of the providers OpenCode has a login or key for, so set the provider key in **Env** first.
 
-```
--m deepseek/deepseek-flash
-```
-
-`opencode models` lists the models your providers offer. Without `-m`, OpenCode uses the `model` from its own config.
+`-m provider/model` in the worker's engine arguments still works; if the engine args already set a model with `-m` or `--model`, they win and the Model field is ignored. Without either, OpenCode uses the `model` from its own config.
 
 ## Sessions
 
@@ -65,7 +61,7 @@ Token usage is read with `opencode session export` and summed per `provider/mode
 ## How it runs OpenCode
 
 ```
-opencode run --standalone --auto --format json [--session ses_<id>] [extra args]
+opencode run --standalone --auto --format json [--session ses_<id>] [--model <model>] [extra args]
 ```
 
 - The prompt is written to OpenCode's standard input.

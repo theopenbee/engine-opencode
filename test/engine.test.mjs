@@ -78,6 +78,15 @@ if (args[0] === "session" && args[1] === "export") {
   fs.writeSync(1, fs.readFileSync(file, "utf8"));
   process.exit(0);
 }
+if (args[0] === "models") {
+  const modelsMode = process.env.FAKE_OPENCODE_MODELS_MODE || "ok";
+  if (modelsMode === "fail") {
+    fail("Loading providers\\nError: failed to load the provider list\\n\\n");
+    process.exit(1);
+  }
+  if (modelsMode === "ok") fs.writeSync(1, "deepseek/deepseek-flash\\nopencode/big-pickle\\n\\n");
+  process.exit(0);
+}
 const sessionAt = args.indexOf("--session");
 const session = sessionAt >= 0 ? args[sessionAt + 1] : "ses_generated";
 const text = (value) => emit({ type: "text", sessionID: session, part: { type: "text", text: value } });
@@ -290,6 +299,36 @@ for (const runtime of runtimes) {
     assert.equal(call.stdin, "follow up");
   });
 
+  t("run puts the model after the session and before the extra args, for new and resumed sessions", async () => {
+    for (const resume of [false, true]) {
+      const record = join(freshDir("rec"), "calls.jsonl");
+      const req = baseRequest("run", runParams({ resume, model: "deepseek/deepseek-flash", extra_args: ["--agent", "build"] }));
+      const raw = await runPlugin(runtime, req, { FAKE_OPENCODE_RECORD: record });
+      response(raw);
+      assert.deepEqual(recordedCall(record).argv, [...FIXED, "--session", `ses_${SESSION}`, "--model", "deepseek/deepseek-flash", "--agent", "build"]);
+      assert.doesNotMatch(raw.stderr, /already set a model/);
+    }
+  });
+
+  t("run lets extra args that already set a model win and warns", async () => {
+    for (const extra of [["--model", "opencode/big-pickle"], ["--model=opencode/big-pickle"], ["-m", "opencode/big-pickle"]]) {
+      const record = join(freshDir("rec"), "calls.jsonl");
+      const req = baseRequest("run", runParams({ model: "deepseek/deepseek-flash", extra_args: extra }));
+      const raw = await runPlugin(runtime, req, { FAKE_OPENCODE_RECORD: record });
+      response(raw);
+      assert.deepEqual(recordedCall(record).argv, [...FIXED, "--session", `ses_${SESSION}`, ...extra]);
+      assert.match(raw.stderr, /\[warn\] engine args already set a model, ignoring model "deepseek\/deepseek-flash"/);
+    }
+  });
+
+  t("run passes no model flag when the model is empty or absent", async () => {
+    for (const overrides of [{ model: "" }, {}]) {
+      const record = join(freshDir("rec"), "calls.jsonl");
+      response(await runPlugin(runtime, baseRequest("run", runParams(overrides)), { FAKE_OPENCODE_RECORD: record }));
+      assert.deepEqual(recordedCall(record).argv, [...FIXED, "--session", `ses_${SESSION}`]);
+    }
+  });
+
   t("run without a session id lets opencode create one", async () => {
     const record = join(freshDir("rec"), "calls.jsonl");
     const res = response(await runPlugin(runtime, baseRequest("run", runParams({ session_id: "" })), { FAKE_OPENCODE_RECORD: record }));
@@ -440,6 +479,32 @@ for (const runtime of runtimes) {
     },
     { skip: process.platform === "win32" },
   );
+
+  t("models lists one provider/model per line from a standalone opencode", async () => {
+    const record = join(freshDir("rec"), "calls.jsonl");
+    const res = response(await runPlugin(runtime, baseRequest("models", {}), { FAKE_OPENCODE_RECORD: record }));
+    assert.deepEqual(res, { result: { models: [{ id: "deepseek/deepseek-flash" }, { id: "opencode/big-pickle" }] } });
+    const call = recordedCall(record);
+    assert.deepEqual(call.argv, ["models", "--standalone"]);
+    assert.equal(call.env.OPENCODE_DISABLE_AUTOUPDATE, "1");
+  });
+
+  t("models returns an empty list when opencode prints none", async () => {
+    const res = response(await runPlugin(runtime, baseRequest("models", {}), { FAKE_OPENCODE_MODELS_MODE: "none" }));
+    assert.deepEqual(res, { result: { models: [] } });
+  });
+
+  t("models reports the last stderr line when opencode fails", async () => {
+    const res = response(await runPlugin(runtime, baseRequest("models", {}), { FAKE_OPENCODE_MODELS_MODE: "fail" }));
+    assert.deepEqual(res, { error: { message: "opencode exited with code 1: Error: failed to load the provider list" } });
+  });
+
+  t("models fails when opencode cannot be found", async () => {
+    const res = response(
+      await runPlugin(runtime, baseRequest("models", {}, { config: {} }), { PATH: freshDir("empty-path"), HOME: freshDir("home") }),
+    );
+    assert.deepEqual(res, { error: { message: "opencode not found on PATH" } });
+  });
 
   t("usage exports each session and sums tokens per model, omitting unknown sessions", async () => {
     const sessions = freshDir("sessions");

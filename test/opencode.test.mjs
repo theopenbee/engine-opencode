@@ -11,7 +11,9 @@ import {
   failureText,
   findOpencode,
   majorVersion,
+  modelArgs,
   opencodeSessionId,
+  parseModels,
   scanLog,
   sessionUsage,
 } from "../dist/opencode.js";
@@ -58,6 +60,34 @@ test("buildArgs passes the session and then the extra args", () => {
     "-m",
     "deepseek/deepseek-flash",
   ]);
+});
+
+test("modelArgs passes a model as --model", () => {
+  assert.deepEqual(modelArgs("deepseek/deepseek-flash", []), ["--model", "deepseek/deepseek-flash"]);
+  assert.deepEqual(modelArgs("deepseek/deepseek-flash", ["--agent", "build"]), ["--model", "deepseek/deepseek-flash"]);
+});
+
+test("modelArgs is empty without a model", () => {
+  assert.deepEqual(modelArgs(undefined, []), []);
+  assert.deepEqual(modelArgs("", []), []);
+});
+
+test("modelArgs leaves the model to extra args that already set one", () => {
+  assert.deepEqual(modelArgs("deepseek/deepseek-flash", ["--model", "opencode/big-pickle"]), []);
+  assert.deepEqual(modelArgs("deepseek/deepseek-flash", ["--model=opencode/big-pickle"]), []);
+  assert.deepEqual(modelArgs("deepseek/deepseek-flash", ["-m", "opencode/big-pickle"]), []);
+});
+
+test("parseModels reads one model per line and skips blank lines", () => {
+  assert.deepEqual(parseModels("deepseek/deepseek-flash\r\n\n  opencode/big-pickle  \n\n"), [
+    { id: "deepseek/deepseek-flash" },
+    { id: "opencode/big-pickle" },
+  ]);
+});
+
+test("parseModels returns an empty list for empty output", () => {
+  assert.deepEqual(parseModels(""), []);
+  assert.deepEqual(parseModels("\n  \n"), []);
 });
 
 test("configContent is empty without an MCP address", () => {
