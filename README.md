@@ -56,7 +56,7 @@ Set the worker's **Model** field, in OpenCode's `provider/model` form (for examp
 
 Each openbee conversation maps to the OpenCode session `ses_<openbee session id>`. OpenCode creates it on the first message and continues it afterwards, so the plugin keeps no files of its own. Sessions live in OpenCode's database (`~/.local/share/opencode/`) and show up in OpenCode's session list.
 
-Token usage is read with `opencode session export` and summed per `provider/model`. Reasoning tokens count as output tokens.
+Token usage is read with `opencode session export` and summed per `provider/model`. Reasoning tokens count as output tokens. Tokens that OpenCode counts for the session but not for any message, such as generating the session title, go to the session's model. Subagent sessions the run started are counted in the openbee session that started them.
 
 ## How it runs OpenCode
 

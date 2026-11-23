@@ -14,6 +14,7 @@ import {
   modelArgs,
   opencodeSessionId,
   parseModels,
+  childSessionIds,
   scanLog,
   sessionUsage,
 } from "../dist/opencode.js";
@@ -182,7 +183,7 @@ test("majorVersion reads the major version", () => {
 
 test("sessionUsage sums assistant messages per model", () => {
   const exported = {
-    info: { id: "ses_x", tokens: { input: 999 } },
+    info: { id: "ses_x" },
     messages: [
       { type: "user", text: "hi" },
       {
@@ -204,6 +205,52 @@ test("sessionUsage sums assistant messages per model", () => {
     { model: "deepseek/deepseek-flash", input_tokens: 299, output_tokens: 31, cache_creation_tokens: 5, cache_read_tokens: 13952 },
     { model: "opencode/big-pickle", input_tokens: 7, output_tokens: 8, cache_creation_tokens: 0, cache_read_tokens: 0 },
   ]);
+});
+
+test("sessionUsage adds what the session total has beyond its messages to the session model", () => {
+  const exported = {
+    info: {
+      id: "ses_x",
+      model: { id: "deepseek-flash", providerID: "deepseek", variant: "default" },
+      tokens: { input: 4977, output: 117, reasoning: 26, cache: { read: 13952, write: 0 } },
+    },
+    messages: [
+      {
+        type: "assistant",
+        model: { id: "deepseek-flash", providerID: "deepseek" },
+        tokens: { input: 4310, output: 86, reasoning: 26, cache: { read: 1664, write: 0 } },
+      },
+      { type: "assistant", model: { id: "big-pickle", providerID: "opencode" }, tokens: { input: 455, output: 24, cache: { read: 12032 } } },
+    ],
+  };
+  assert.deepEqual(sessionUsage(exported), [
+    { model: "deepseek/deepseek-flash", input_tokens: 4522, output_tokens: 119, cache_creation_tokens: 0, cache_read_tokens: 1920 },
+    { model: "opencode/big-pickle", input_tokens: 455, output_tokens: 24, cache_creation_tokens: 0, cache_read_tokens: 12032 },
+  ]);
+});
+
+test("sessionUsage adds nothing when the session total is not above its messages", () => {
+  const exported = {
+    info: { id: "ses_x", model: { id: "other", providerID: "x" }, tokens: { input: 10, output: 1, cache: { read: 0, write: 0 } } },
+    messages: [{ type: "assistant", model: { id: "m", providerID: "p" }, tokens: { input: 12, output: 1 } }],
+  };
+  assert.deepEqual(sessionUsage(exported), [
+    { model: "p/m", input_tokens: 12, output_tokens: 1, cache_creation_tokens: 0, cache_read_tokens: 0 },
+  ]);
+});
+
+test("childSessionIds lists the sessions that tool calls started", () => {
+  const tool = (sessionID) => ({ type: "tool", name: "subagent", state: { status: "completed", metadata: { sessionID } } });
+  const exported = {
+    info: { id: "ses_parent" },
+    messages: [
+      { type: "user", text: "hi" },
+      { type: "assistant", content: [{ type: "text", text: "x" }, tool("ses_a"), tool("ses_b"), tool("ses_a")] },
+      { type: "assistant", content: [tool("ses_parent"), tool("not-a-session"), tool("ses_../x"), { type: "tool", state: {} }] },
+    ],
+  };
+  assert.deepEqual(childSessionIds(exported), ["ses_a", "ses_b"]);
+  assert.deepEqual(childSessionIds(null), []);
 });
 
 test("sessionUsage ignores exports without messages", () => {
@@ -250,6 +297,26 @@ test("collectUsage stops an export that outlives the time budget", { skip: proce
   const started = Date.now();
   assert.deepEqual(await collectUsage(command, ["a"], { budgetMs: 500 }), {});
   assert.ok(Date.now() - started < 5000);
+});
+
+test("collectUsage adds the usage of subagent sessions to their root session", async () => {
+  const tool = (sessionID) => ({ type: "tool", name: "subagent", state: { metadata: { sessionID } } });
+  const usage = (input) => ({ type: "assistant", model: { id: "m", providerID: "p" }, tokens: { input, output: 0 } });
+  const sessions = {
+    ses_root: { info: { id: "ses_root" }, messages: [{ ...usage(100), content: [tool("ses_child"), tool("ses_stranger")] }] },
+    ses_child: { info: { id: "ses_child", parentID: "ses_root" }, messages: [{ ...usage(10), content: [tool("ses_grandchild"), tool("ses_root")] }] },
+    ses_grandchild: { info: { id: "ses_grandchild", parentID: "ses_child" }, messages: [usage(1)] },
+    ses_stranger: { info: { id: "ses_stranger", parentID: "ses_elsewhere" }, messages: [usage(1000)] },
+    ses_alone: { info: { id: "ses_alone" }, messages: [usage(5), { content: [tool("ses_missing")] }] },
+  };
+  const command = fakeExporter(
+    `const sessions = ${JSON.stringify(sessions)};\n` +
+      "const id = process.argv[process.argv.length - 1];\n" +
+      'if (!sessions[id]) { process.stderr.write("Session not found: " + id + "\\n"); process.exit(1); }\n' +
+      "process.stdout.write(JSON.stringify(sessions[id]));",
+  );
+  const counts = (input) => [{ model: "p/m", input_tokens: input, output_tokens: 0, cache_creation_tokens: 0, cache_read_tokens: 0 }];
+  assert.deepEqual(await collectUsage(command, ["root", "alone", "gone"]), { root: counts(111), alone: counts(5) });
 });
 
 test("collectUsage exports sessions in parallel", { skip: process.platform === "win32" }, async () => {

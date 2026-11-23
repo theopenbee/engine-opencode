@@ -539,13 +539,13 @@ for (const runtime of runtimes) {
   t("usage warns and skips a session whose export fails", async () => {
     const raw = await runPlugin(runtime, baseRequest("usage", { session_ids: ["sess-a"] }), { FAKE_OPENCODE_EXPORT_MODE: "crash" });
     assert.deepEqual(response(raw), { result: { usage: {} } });
-    assert.match(raw.stderr, /\[warn\] export opencode session sess-a failed: export exploded/);
+    assert.match(raw.stderr, /\[warn\] export opencode session ses_sess-a failed: export exploded/);
   });
 
   t("usage warns and skips a session whose export is not JSON", async () => {
     const raw = await runPlugin(runtime, baseRequest("usage", { session_ids: ["sess-a"] }), { FAKE_OPENCODE_EXPORT_MODE: "garbage" });
     assert.deepEqual(response(raw), { result: { usage: {} } });
-    assert.match(raw.stderr, /\[warn\] export opencode session sess-a returned invalid JSON/);
+    assert.match(raw.stderr, /\[warn\] export opencode session ses_sess-a returned invalid JSON/);
   });
 
   t("usage with no sessions does not start opencode", async () => {

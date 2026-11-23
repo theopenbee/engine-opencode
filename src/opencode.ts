@@ -10,6 +10,8 @@ import type { Engine, EngineRequest, ModelInfo, RunParams, RunResult, TokenUsage
 const MIN_MAJOR_VERSION = 2;
 const SESSION_PREFIX = "ses_";
 const SESSION_ID = /^[A-Za-z0-9_-]+$/;
+const CHILD_SESSION_ID = /^ses_[A-Za-z0-9_-]+$/;
+const MAX_SUBAGENT_DEPTH = 4;
 const EXPORT_CONCURRENCY = 8;
 const EXPORT_TIMEOUT_MS = 20_000;
 const EXPORT_MAX_BUFFER = 512 * 1024 * 1024;
@@ -185,32 +187,71 @@ function modelName(model: unknown): string {
   return provider !== "" && id !== "" ? `${provider}/${id}` : id;
 }
 
+type TokenCounts = Omit<TokenUsage, "model">;
+
+const COUNT_FIELDS = ["input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens"] as const;
+
+function readTokens(tokens: unknown): TokenCounts | undefined {
+  if (!isObject(tokens)) return undefined;
+  const cache = isObject(tokens.cache) ? tokens.cache : {};
+  return {
+    input_tokens: numberOrZero(tokens.input),
+    output_tokens: numberOrZero(tokens.output) + numberOrZero(tokens.reasoning),
+    cache_creation_tokens: numberOrZero(cache.write),
+    cache_read_tokens: numberOrZero(cache.read),
+  };
+}
+
+function addUsage(byModel: Map<string, TokenUsage>, model: string, counts: TokenCounts): void {
+  let total = byModel.get(model);
+  if (!total) {
+    total = { model, input_tokens: 0, output_tokens: 0, cache_creation_tokens: 0, cache_read_tokens: 0 };
+    byModel.set(model, total);
+  }
+  for (const field of COUNT_FIELDS) total[field] += counts[field];
+}
+
 export function sessionUsage(exported: unknown): TokenUsage[] {
   if (!isObject(exported) || !Array.isArray(exported.messages)) return [];
   const byModel = new Map<string, TokenUsage>();
+  const counted: TokenCounts = { input_tokens: 0, output_tokens: 0, cache_creation_tokens: 0, cache_read_tokens: 0 };
   for (const message of exported.messages) {
-    if (!isObject(message) || message.type !== "assistant" || !isObject(message.tokens)) continue;
-    const tokens = message.tokens;
-    const cache = isObject(tokens.cache) ? tokens.cache : {};
-    const model = modelName(message.model);
-    let total = byModel.get(model);
-    if (!total) {
-      total = { model, input_tokens: 0, output_tokens: 0, cache_creation_tokens: 0, cache_read_tokens: 0 };
-      byModel.set(model, total);
-    }
-    total.input_tokens += numberOrZero(tokens.input);
-    total.output_tokens += numberOrZero(tokens.output) + numberOrZero(tokens.reasoning);
-    total.cache_creation_tokens += numberOrZero(cache.write);
-    total.cache_read_tokens += numberOrZero(cache.read);
+    if (!isObject(message) || message.type !== "assistant") continue;
+    const tokens = readTokens(message.tokens);
+    if (!tokens) continue;
+    addUsage(byModel, modelName(message.model), tokens);
+    for (const field of COUNT_FIELDS) counted[field] += tokens[field];
+  }
+  const info = isObject(exported.info) ? exported.info : {};
+  const total = readTokens(info.tokens);
+  if (total) {
+    const rest = { ...total };
+    for (const field of COUNT_FIELDS) rest[field] = Math.max(0, total[field] - counted[field]);
+    if (COUNT_FIELDS.some((field) => rest[field] > 0)) addUsage(byModel, modelName(info.model), rest);
   }
   return [...byModel.values()];
 }
 
-function exportSession(command: string, sessionId: string, timeoutMs: number): Promise<unknown> {
+export function childSessionIds(exported: unknown): string[] {
+  if (!isObject(exported) || !Array.isArray(exported.messages)) return [];
+  const own = isObject(exported.info) ? exported.info.id : undefined;
+  const ids = new Set<string>();
+  for (const message of exported.messages) {
+    if (!isObject(message) || !Array.isArray(message.content)) continue;
+    for (const part of message.content) {
+      if (!isObject(part) || part.type !== "tool" || !isObject(part.state) || !isObject(part.state.metadata)) continue;
+      const id = part.state.metadata.sessionID;
+      if (typeof id === "string" && id !== own && CHILD_SESSION_ID.test(id)) ids.add(id);
+    }
+  }
+  return [...ids];
+}
+
+function exportSession(command: string, opencodeId: string, timeoutMs: number): Promise<unknown> {
   return new Promise((resolve) => {
     execFile(
       command,
-      ["session", "export", "--standalone", opencodeSessionId(sessionId)],
+      ["session", "export", "--standalone", opencodeId],
       {
         timeout: timeoutMs,
         killSignal: "SIGKILL",
@@ -222,7 +263,7 @@ function exportSession(command: string, sessionId: string, timeoutMs: number): P
         if (err) {
           const detail = lastNonEmptyLine(String(stderr));
           if (!detail.startsWith("Session not found")) {
-            log.warn(`export opencode session ${sessionId} failed: ${detail || errorMessage(err)}`);
+            log.warn(`export opencode session ${opencodeId} failed: ${detail || errorMessage(err)}`);
           }
           resolve(undefined);
           return;
@@ -230,12 +271,18 @@ function exportSession(command: string, sessionId: string, timeoutMs: number): P
         try {
           resolve(JSON.parse(String(stdout)));
         } catch (parseErr) {
-          log.warn(`export opencode session ${sessionId} returned invalid JSON: ${errorMessage(parseErr)}`);
+          log.warn(`export opencode session ${opencodeId} returned invalid JSON: ${errorMessage(parseErr)}`);
           resolve(undefined);
         }
       },
     );
   });
+}
+
+interface ExportJob {
+  root: string;
+  id: string;
+  parent?: string;
 }
 
 export async function collectUsage(
@@ -245,25 +292,52 @@ export async function collectUsage(
 ): Promise<Record<string, TokenUsage[]>> {
   const ids = [...new Set(sessionIds)].filter((id) => typeof id === "string" && SESSION_ID.test(id));
   const deadline = Date.now() + (options.budgetMs ?? USAGE_BUDGET_MS);
-  const found = new Map<string, TokenUsage[]>();
-  let next = 0;
+  const concurrency = options.concurrency ?? EXPORT_CONCURRENCY;
+  const found = new Map<string, Map<string, TokenUsage>>();
+  const seen = new Set<string>();
   let skipped = 0;
-  const work = async () => {
-    while (next < ids.length) {
-      const id = ids[next++];
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) {
-        skipped++;
-        continue;
+
+  const exportAll = async (jobs: ExportJob[]): Promise<unknown[]> => {
+    const results: unknown[] = new Array(jobs.length);
+    let next = 0;
+    const work = async () => {
+      while (next < jobs.length) {
+        const index = next++;
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) {
+          skipped++;
+          continue;
+        }
+        results[index] = await exportSession(command, jobs[index].id, Math.min(EXPORT_TIMEOUT_MS, remaining));
       }
-      const exported = await exportSession(command, id, Math.min(EXPORT_TIMEOUT_MS, remaining));
-      if (exported !== undefined) found.set(id, sessionUsage(exported));
-    }
+    };
+    const workers = Math.max(1, Math.min(concurrency, jobs.length));
+    await Promise.all(Array.from({ length: workers }, work));
+    return results;
   };
-  const workers = Math.max(1, Math.min(options.concurrency ?? EXPORT_CONCURRENCY, ids.length));
-  await Promise.all(Array.from({ length: workers }, work));
+
+  let level: ExportJob[] = ids.map((id) => ({ root: id, id: opencodeSessionId(id) }));
+  for (const job of level) seen.add(job.id);
+  for (let depth = 0; depth <= MAX_SUBAGENT_DEPTH && level.length > 0; depth++) {
+    const exported = await exportAll(level);
+    const next: ExportJob[] = [];
+    level.forEach((job, index) => {
+      const data = exported[index];
+      if (data === undefined) return;
+      if (job.parent !== undefined && !(isObject(data) && isObject(data.info) && data.info.parentID === job.parent)) return;
+      const byModel = found.get(job.root) ?? new Map<string, TokenUsage>();
+      found.set(job.root, byModel);
+      for (const usage of sessionUsage(data)) addUsage(byModel, usage.model, usage);
+      for (const child of childSessionIds(data)) {
+        if (seen.has(child)) continue;
+        seen.add(child);
+        next.push({ root: job.root, id: child, parent: job.id });
+      }
+    });
+    level = next;
+  }
   if (skipped > 0) log.warn(`usage ran out of time, ${skipped} sessions were not read`);
-  return Object.fromEntries(ids.filter((id) => found.has(id)).map((id) => [id, found.get(id) ?? []]));
+  return Object.fromEntries(ids.filter((id) => found.has(id)).map((id) => [id, [...(found.get(id)?.values() ?? [])]]));
 }
 
 export function parseModels(output: string): ModelInfo[] {
