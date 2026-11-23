@@ -5,6 +5,7 @@
   "name": { "en": "OpenCode", "zh": "OpenCode" },
   "description": { "en": "Runs tasks with OpenCode", "zh": "用 OpenCode 执行任务" },
   "command": ["node", "dist/index.js"],
+  "icon": "icon.svg",
   "config": [
     {
       "key": "path",
