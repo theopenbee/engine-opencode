@@ -1,0 +1,45 @@
+{
+  "name": "@theopenbee/engine-opencode",
+  "version": "0.1.0",
+  "description": "OpenCode engine plugin for openbee",
+  "keywords": [
+    "openbee",
+    "openbee-plugin",
+    "openbee-engine",
+    "opencode"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/theopenbee/engine-opencode.git"
+  },
+  "homepage": "https://github.com/theopenbee/engine-opencode#readme",
+  "bugs": {
+    "url": "https://github.com/theopenbee/engine-opencode/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "files": [
+    "dist",
+    "openbee.plugin.json"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test test/*.test.mjs",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "@theopenbee/engine-sdk": "^0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}

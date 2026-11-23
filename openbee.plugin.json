@@ -1,0 +1,16 @@
+{
+  "protocol_version": 1,
+  "type": "engine",
+  "id": "opencode",
+  "name": { "en": "OpenCode", "zh": "OpenCode" },
+  "description": { "en": "Runs tasks with OpenCode", "zh": "用 OpenCode 执行任务" },
+  "command": ["node", "dist/index.js"],
+  "config": [
+    {
+      "key": "path",
+      "type": "string",
+      "label": { "en": "OpenCode path", "zh": "OpenCode 路径" },
+      "help": { "en": "Leave empty to use opencode on PATH or in ~/.opencode/bin", "zh": "留空则使用 PATH 或 ~/.opencode/bin 里的 opencode" }
+    }
+  ]
+}
